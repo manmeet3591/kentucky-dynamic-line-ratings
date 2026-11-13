@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kentucky Dynamic Line Ratings</title>
+<meta name="description" content="IEEE 738 dynamic line ratings for Kentucky transmission lines from ERA5 hindcasts and archived NOAA GFS/HRRR 1-3 day forecasts, compared with static seasonal and ambient-adjusted ratings.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Kentucky Dynamic Line Ratings</h1>
+    <p class="sub">IEEE 738 thermal ratings of Kentucky transmission lines from weather, as a ratio to the static seasonal rating · ERA5 hindcast vs NOAA GFS/HRRR 1–3 day forecasts</p>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-view="map">Map</button>
+    <button role="tab" aria-selected="false" data-view="year">Year 2025</button>
+    <button role="tab" aria-selected="false" data-view="method">Method &amp; limits</button>
+  </nav>
+</header>
+
+<main id="app">
+  <aside class="controls" aria-label="Controls">
+    <section>
+      <h2>Period</h2>
+      <div class="pbtns" id="periods"></div>
+      <p class="hint" id="pblurb"></p>
+    </section>
+    <section>
+      <h2>Time <span class="muted">(Eastern)</span></h2>
+      <div class="clock">
+        <button id="play" aria-label="Play">▶</button>
+        <output id="tlabel"></output>
+      </div>
+      <input type="range" id="slider" min="0" max="0" value="0" aria-label="Hour">
+      <div class="tl" id="tl"></div>
+    </section>
+    <section>
+      <h2>Weather</h2>
+      <div class="seg wrap" id="src">
+        <button data-src="era5" class="on">Hindcast (ERA5)</button>
+        <button data-src="d1">Forecast 1 day</button>
+        <button data-src="d2">Forecast 2 days</button>
+        <button data-src="d3">Forecast 3 days</button>
+      </div>
+      <p class="hint" id="srcHint"></p>
+    </section>
+    <section>
+      <h2>Rating</h2>
+      <div class="seg" id="kind">
+        <button data-kind="dlr" class="on">DLR</button>
+        <button data-kind="aar">Ambient-adjusted</button>
+      </div>
+      <p class="hint" id="kindHint"></p>
+    </section>
+    <section>
+      <h2>Voltage</h2>
+      <div id="kvs"></div>
+    </section>
+  </aside>
+
+  <section class="view" id="view-map">
+    <div id="map" role="region" aria-label="Map of Kentucky transmission lines"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <aside class="detail" aria-label="Summary and line detail">
+    <h2 id="nowTitle">This hour</h2>
+    <div id="kpis" class="kpis"></div>
+    <h2 id="perTitle">Whole period</h2>
+    <div id="pshare"></div>
+    <div id="line" class="mt"></div>
+    <h2 class="mt">Tightest lines this hour</h2>
+    <ol id="rank" class="rank"></ol>
+    <h2 class="mt">Forecast vs hindcast, this period</h2>
+    <div id="skill"></div>
+  </aside>
+
+  <section class="view hidden" id="view-year">
+    <div class="yearwrap" id="year"></div>
+  </section>
+
+  <section class="view hidden prose" id="view-method">
+    <h2>What this shows</h2>
+    <p>A transmission line's rating is the current it can carry before the conductor gets too hot (it sags toward the ground and the aluminium anneals). Utilities normally use a <b>static seasonal rating</b> that assumes hot, still, sunny weather all season long. The weather is usually kinder than that, and occasionally worse. A <b>dynamic line rating (DLR)</b> recomputes the limit each hour from the actual air temperature, wind and sun. This prototype computes hourly DLR for each Kentucky transmission line from reanalysis and archived forecasts. It shows where and when DLR gives <b>extra headroom</b> (ratio &gt; 1), and when it falls <b>below</b> the static rating (ratio &lt; 1, meaning the static rating overstated what was safe).</p>
+
+    <h3>1. Lines and segments</h3>
+    <ul>
+      <li><b>Lines</b>: HIFLD <i>Electric Power Transmission Lines</i> (copy from the KGFM project), in-service lines at 69, 138, 161, 345, 500 and 765 kV, clipped to Kentucky: <span class="m-lines"></span> lines, <span class="m-km"></span> km. Lines with unknown voltage (−999999) and 46 kV are excluded. HIFLD has no 230 kV lines inside Kentucky.</li>
+      <li>Each line is cut into ~1 km segments (<span class="m-seg"></span> in all). Each segment's azimuth comes from its chord. Each segment takes the weather of the nearest node on a 0.25° grid (<span class="m-nodes"></span> nodes, ~22 × 28 km).</li>
+      <li>A line's rating each hour is the <b>minimum over its segments</b>: the hottest span limits the whole circuit. This is the standard DLR convention and is conservative.</li>
+    </ul>
+
+    <h3>2. Thermal rating (IEEE Std 738-2012)</h3>
+    <ul>
+      <li>Steady-state heat balance: <code>I = √((q<sub>c</sub> + q<sub>r</sub> − q<sub>s</sub>) / R(T<sub>max</sub>))</code>. Forced convection (larger of the low- and high-wind formulas, with the wind-angle factor K<sub>angle</sub>) or natural convection, whichever is larger. Radiative cooling, solar heating, and AC resistance interpolated linearly through 25 and 75 °C. Air density uses the elevation of the weather node.</li>
+      <li>Check: the code reproduces the standard's worked example (795 kcmil Drake, 40 °C, 0.61 m/s, 100 °C): <b>1025 A</b>.</li>
+      <li><b>Maximum conductor temperature <span class="m-tmax"></span> °C</b> for all lines; emissivity <span class="m-eps"></span>, solar absorptivity <span class="m-abs"></span> (weathered conductor).</li>
+      <li><b>DLR weather</b>: 2 m air temperature, 10 m wind speed and direction (angle to each segment's axis), and direct + diffuse solar radiation. Beam irradiance is converted to beam-normal and applied with the sun-to-conductor angle; diffuse irradiance is applied to the projected diameter.</li>
+      <li><b>Ambient-adjusted rating (AAR)</b>, as required by FERC Order 881: the hourly air temperature and sun height, but the static rating's wind (0.61 m/s perpendicular) and clear-sky sun. AAR captures temperature only. It shows how much of the DLR gain comes from wind.</li>
+    </ul>
+
+    <h3>3. Assumed conductors (not the real ones)</h3>
+    <p>Actual conductor types, ratings and limiting elements for Kentucky lines are not public. Each voltage class gets a common US conductor. Resistance and diameter come from ACSR manufacturer tables, rounded (±5 %):</p>
+    <div class="tablewrap"><table id="condTbl"></table></div>
+    <p class="hint">Static ratings use the same model: summer <span class="m-ss"></span>; winter <span class="m-sw"></span>. Wind 0.61 m/s (2 ft/s) perpendicular to the line, clear sky, sun perpendicular to the line, 200 m elevation. The winter rating applies December–February; the summer rating applies March–November, which is conservative for spring and autumn. The results are ratios, so the choice of conductor mainly changes their absolute size by voltage class, not the hour-to-hour pattern.</p>
+
+    <h3>4. Weather</h3>
+    <ul>
+      <li><b>Hindcast</b>: ERA5 reanalysis (ECMWF, 0.25°, hourly) via the <a href="https://open-meteo.com/en/docs/historical-weather-api">Open-Meteo historical archive</a>. ERA5 serves as the reference ("what happened"), but it is a model reanalysis, not a line-side measurement.</li>
+      <li><b>Forecasts</b>: NOAA GFS and HRRR as issued 1, 2 and 3 days ahead, via the <a href="https://open-meteo.com/en/docs/previous-runs-api">Open-Meteo Previous Runs API</a> (model <code>gfs_seamless</code>: HRRR 3 km over CONUS for the first ~2 days, GFS after that; archive from 2024). Forecasts are sampled at the same 0.25° nodes, so the HRRR detail between nodes is not used.</li>
+      <li><b>Periods</b> were chosen from a 2024–2025 ERA5 scan (<code>pipeline/choose_periods.py</code>): the hottest 5-day stretch, the hour with the lowest 5th-percentile ratio in summer, the windiest cool day, and a warm calm winter afternoon (where the winter rating looks worst).</li>
+      <li><b>Hook for DSOC Aircast SR (1 km)</b>: <code>pipeline/weather.py</code> defines one interface, <code>fetch(nodes, start, end) → (times, {ta, ws, wd, dni, dhi})</code>. A 1 km super-resolved field can be added as one more source and sampled at each segment midpoint instead of the 0.25° nodes. That is the change that would make segment-level DLR meaningful.</li>
+    </ul>
+
+    <h3>Limitations</h3>
+    <ul>
+      <li><b>No validation against line data.</b> There are no line sensors, conductor temperatures, sag measurements or utility ratings in this project, so these ratings are not validated. They show what IEEE 738 gives for an assumed conductor under model weather.</li>
+      <li><b>Assumed conductors and limits.</b> The real conductors, maximum temperatures (often 75–100 °C, some lines lower due to clearance), and terminal-equipment limits (breakers, CTs, wave traps) are unknown. Many lines are limited by terminal equipment, so their DLR gains could never be used.</li>
+      <li><b>Weather resolution.</b> Weather comes from 0.25° nodes (~25 km). HRRR is ~3 km but is sampled at the same nodes. Wind at line height and in sheltered valleys and tree-lined corridors differs from a 10 m grid-cell average. That difference matters most at low wind, which is exactly when ratings are tight. Model winds in complex terrain like eastern Kentucky's are especially uncertain. Operational DLR typically uses line-mounted sensors or a conservative wind floor, and this prototype uses neither.</li>
+      <li><b>Steady state only.</b> No thermal time constant (a conductor takes 10–20 minutes to heat up), so short-term emergency ratings aren't modelled. Hourly averages hide gusts and lulls.</li>
+      <li><b>Line geometry</b>: HIFLD routes are generalised and may be years old, which affects the azimuths. Ratings exclude the actual structures, spans and sags.</li>
+      <li><b>Forecast scoring</b> is against ERA5, not observations. Part of the "error" is ERA5 vs GFS/HRRR model difference.</li>
+      <li><b>Why deficits appear.</b> The static rating assumes 0.61 m/s of wind at right angles to the line. Hourly grid-cell winds are often weaker than that on calm afternoons and nights, or blow nearly along a segment. Because a line takes its weakest segment's rating, long lines crossing many cells are more likely to hit such a segment. The deficits shown here are real under these assumptions, but they depend on the wind data at its weakest point.</li>
+      <li>This is a screening prototype for discussion with utilities, not an operational rating.</li>
+    </ul>
+
+    <h3>Data sources</h3>
+    <ul>
+      <li>Lines: <a href="https://hifld-geoplatform.hub.arcgis.com/">HIFLD Open</a> Electric Power Transmission Lines (public domain).</li>
+      <li>Weather: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0): ERA5 (Copernicus Climate Change Service, Hersbach et al. 2020) and NOAA GFS / HRRR.</li>
+      <li>Method: IEEE Std 738-2012, <i>Standard for Calculating the Current-Temperature Relationship of Bare Overhead Conductors</i>. FERC Order 881 (2021) for ambient-adjusted ratings.</li>
+    </ul>
+    <p class="hint">Pipeline and code: see the repository README. Built <span class="built"></span>.</p>
+  </section>
+</main>
+<footer class="foot">Disaster Science Operations Center · prototype · lines: HIFLD · weather: ERA5 and NOAA GFS/HRRR via Open-Meteo · method: IEEE 738 · not validated against line measurements · built <span class="built"></span></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>
