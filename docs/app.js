@@ -367,29 +367,33 @@
   function renderYear() {
     const Y = D.year, el = $("year");
     if (!Y) { el.innerHTML = `<p class="empty">Year statistics not built yet.</p>`; return; }
-    const head = Y.total.slice(3).reduce((a, b) => a + b, 0), def = Y.total.slice(0, 3).reduce((a, b) => a + b, 0);
+    // year bins: <0.9, 0.9–1.0, 1.0–1.2, 1.2–1.5, ≥1.5 -> map colours
+    const YC = [1, 2, 3, 4, 6];
+    const ybar = f => `<div class="stack">${f.map((x, i) => `<i style="width:${x * 100}%;background:${css(`--x${YC[i]}`)}" title="${Y.labels[i]}: ${pct(x, 1)}"></i>`).join("")}</div>`;
+    const sum = (f, i, j) => f.slice(i, j).reduce((a, b) => a + b, 0);
+    const head = sum(Y.total, 2), def = sum(Y.total, 0, 2);
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const leg = `<div class="ckey">${BIN_LABELS.map((b, i) => `<span><i style="border-top:10px solid ${css(`--x${i}`)};width:12px"></i>${b}</span>`).join("")}</div>`;
+    const leg = `<div class="ckey">${Y.labels.map((b, i) => `<span><i style="border-top:10px solid ${css(`--x${YC[i]}`)};width:12px"></i>${b}×</span>`).join("")}</div>`;
     const n = D.lines.features.length;
     const idx = Array.from({ length: n }, (_, i) => i).sort((a, b) => Y.lines.deficit[b] - Y.lines.deficit[a]);
-    const kmDef = idx.reduce((s, i) => s + (Y.lines.deficit[i] > 0.01 ? D.lines.features[i].properties.km : 0), 0);
+    const kmDef = idx.reduce((s, i) => s + (Y.lines.deficit[i] > 0.10 ? D.lines.features[i].properties.km : 0), 0);
     el.innerHTML = `<h2>Hourly DLR ÷ static rating over ${Y.year}, ERA5 hindcast, all ${fmt(n)} lines</h2>
       <div class="kpis k3" style="max-width:760px">
         <div class="kpi"><b>${pct(head)}</b><span>of line-hours: DLR ≥ static (headroom)</span></div>
-        <div class="kpi"><b>${pct(Y.total.slice(4).reduce((a, b) => a + b, 0))}</b><span>≥ 1.2× static</span></div>
-        <div class="kpi"><b>${pct(Y.total.slice(5).reduce((a, b) => a + b, 0))}</b><span>≥ 1.5× static</span></div>
+        <div class="kpi"><b>${pct(sum(Y.total, 3))}</b><span>≥ 1.2× static</span></div>
+        <div class="kpi"><b>${pct(Y.total[4])}</b><span>≥ 1.5× static</span></div>
         <div class="kpi"><b>${pct(def, 1)}</b><span>DLR &lt; static (deficit)</span></div>
-        <div class="kpi"><b>${pct(Y.total[0] + Y.total[1], 2)}</b><span>DLR &lt; 0.9× static</span></div>
-        <div class="kpi"><b>${fmt(kmDef)} km</b><span>on lines with &gt; 1 % deficit hours</span></div>
+        <div class="kpi"><b>${pct(Y.total[0], 1)}</b><span>DLR &lt; 0.9× static</span></div>
+        <div class="kpi"><b>${fmt(kmDef)} km</b><span>on lines below static &gt; 10 % of hours</span></div>
       </div>
       <p class="hint">${fmt(Y.line_hours)} line-hours. Each line's rating is its tightest ~1 km segment. Static = summer rating Mar–Nov, winter rating Dec–Feb (method tab).</p>
       ${leg}
       <div class="ygrid mt">
-        <div class="card"><h3>By month</h3>${Y.labels && months.map((m, i) => `<div class="srow"><span>${m}</span>${stackBar(Y.monthly[i + 1])}</div>`).join("")}
-          <p class="hint">Deficits cluster in calm, sunny hours that are warmer than the static assumption. Winter is worst: the 5 °C winter rating is exceeded on mild sunny days.</p></div>
-        <div class="card"><h3>By hour of day (Eastern)</h3>${Y.hourly.map((f, h) => (h % 2 ? "" : `<div class="srow"><span>${h}:00</span>${stackBar(f)}</div>`)).join("")}
+        <div class="card"><h3>By month</h3>${Y.labels && months.map((m, i) => `<div class="srow"><span>${m}</span>${ybar(Y.monthly[i + 1])}</div>`).join("")}
+          <p class="hint">Deficits peak in July–August (about 14 % of line-hours) and again in December–February (8–11 %), when mild, sunny, calm days are far warmer than the 5 °C winter assumption. March and November, windy and cool, have the most headroom.</p></div>
+        <div class="card"><h3>By hour of day (Eastern)</h3>${Y.hourly.map((f, h) => (h % 2 ? "" : `<div class="srow"><span>${h}:00</span>${ybar(f)}</div>`)).join("")}
           <p class="hint">Every other hour shown. Afternoon sun plus light wind give the least headroom; nights and windy afternoons give the most.</p></div>
-        <div class="card"><h3>By voltage class</h3>${Object.entries(Y.by_kv).map(([kv, f]) => `<div class="srow"><span>${kv} kV</span>${stackBar(f)}</div>`).join("")}
+        <div class="card"><h3>By voltage class</h3>${Object.entries(Y.by_kv).map(([kv, f]) => `<div class="srow"><span>${kv} kV</span>${ybar(f)}</div>`).join("")}
           <p class="hint">Bigger conductors and bundles respond differently to the same weather. Long lines also cross more grid cells, so their weakest segment is lower.</p></div>
         <div class="card"><h3>Lines with the most deficit hours</h3>
           <div class="tablewrap" style="max-height:340px"><table id="ytbl"><tr><th>Line</th><th>kV</th><th>km</th><th title="share of hours DLR < static">&lt;1.0</th><th title="share of hours DLR < 0.9 static">&lt;0.9</th><th title="share of hours AAR < static">AAR &lt;1</th><th title="5th percentile ratio">p05</th><th title="median ratio">median</th></tr>
